@@ -138,14 +138,27 @@ class IAWF1:
             w = self.custom_weights.copy()
             if w.shape != f1.shape:
                 raise ValueError("custom_weights shape must match number of classes")
+            # CRITICAL: classes absent from the test set must be excluded BEFORE
+            # applying the user's custom weight vector; otherwise, a class with
+            # n_i = 0 (no samples in the test set) would receive positive weight
+            # if the user-supplied w_i^c were positive, which contradicts the
+            # intended treatment of absent classes.
+            w = np.where(n > 0, w, 0.0)
             if self.normalize_custom and w.sum() > 0:
                 w = w / w.sum()
+            elif w.sum() == 0:
+                # All custom weights zero (or all classes absent). The metric is
+                # undefined in this configuration; return NaN rather than 0 so
+                # the caller is alerted.
+                return float("nan"), w
         else:
-            # Paper formula: w_i_initial = 1/sqrt(n_i) for n_i > 1, else 0.
-            # We treat n_i == 0 the same way (excluded class).
-            initial = np.where(n > 1, 1.0 / np.sqrt(np.maximum(n, 1e-12)), 0.0)
+            # Paper formula: w_i_initial = 1/sqrt(n_i) for n_i >= 1, else 0.
+            initial = np.where(n >= 1, 1.0 / np.sqrt(np.maximum(n, 1e-12)), 0.0)
             total = initial.sum()
-            w = initial / total if total > 0 else np.zeros_like(initial)
+            if total == 0:
+                # All classes absent: metric undefined.
+                return float("nan"), np.zeros_like(initial)
+            w = initial / total
 
         score = float(np.sum(w * f1))
         return score, w
